@@ -30,7 +30,10 @@ export function graphqlExpress(
   }
 
   return (req, res, next): void => {
-    runHttpQuery([req, res], {
+    let remoteIpAddress = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+    let requestIsFromPlayground: boolean = (remoteIpAddress ? ((remoteIpAddress == '::1') || (remoteIpAddress.includes('127.0.0.1'))) : false )
+
+    runHttpQuery([ req, res, { requestIsFromPlayground: requestIsFromPlayground } ], {
       method: req.method,
       options: options,
       query: req.method === 'POST' ? req.body : req.query,
@@ -52,6 +55,7 @@ export function graphqlExpress(
         }
       },
       (error: HttpQueryError) => {
+        console.error("Returning error: ", error.message);
         if ('HttpQueryError' !== error.name) {
           return next(error);
         }

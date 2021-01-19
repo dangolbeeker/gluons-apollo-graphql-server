@@ -19,6 +19,7 @@ import { ExecutionParams } from 'subscriptions-transport-ws';
 import accepts from 'accepts';
 import typeis from 'type-is';
 import { graphqlExpress } from './expressApollo';
+import {PWSEAwsHttpHeader} from "./PWSEAwsHttpHeader";
 
 export { GraphQLOptions, GraphQLExtension } from 'apollo-server-core';
 
@@ -76,6 +77,7 @@ const fileUploadMiddleware = (
 export interface ExpressContext {
   req: express.Request;
   res: express.Response;
+  gluonsHeaders: PWSEAwsHttpHeader;
   connection?: ExecutionParams;
 }
 
@@ -94,8 +96,9 @@ export class ApolloServer extends ApolloServerBase {
   async createGraphQLServerOptions(
     req: express.Request,
     res: express.Response,
+    gluonsHeaders: PWSEAwsHttpHeader
   ): Promise<GraphQLOptions> {
-    return super.graphQLServerOptions({ req, res });
+    return super.graphQLServerOptions({ req, res, gluonsHeaders });
   }
 
   protected supportsSubscriptions(): boolean {
@@ -156,7 +159,7 @@ export class ApolloServer extends ApolloServerBase {
               res.status(503).json({ status: 'fail' });
             });
         } else {
-          res.json({ status: 'pass' });
+          res.json({ status: 'pass', time: new Date().getTime() });
         }
       });
     }
@@ -217,10 +220,18 @@ export class ApolloServer extends ApolloServerBase {
         }
       }
 
-      return graphqlExpress(() => this.createGraphQLServerOptions(req, res))(
+      let remoteIpAddress = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+      let isLocalIp: boolean = (remoteIpAddress ? ((remoteIpAddress == '::1') || (remoteIpAddress.includes('127.0.0.1'))) : false )
+
+      let headers: PWSEAwsHttpHeader = new PWSEAwsHttpHeader(req.headers);
+      if(!headers.isValid() &&  !isLocalIp ) {
+        throw new Error(`Gluons PWSE packet is not valid for remoteIpAddress: ${remoteIpAddress}`);
+      }
+
+      return graphqlExpress(() => this.createGraphQLServerOptions(req, res, headers ))(
         req,
         res,
-        next,
+        next
       );
     });
 

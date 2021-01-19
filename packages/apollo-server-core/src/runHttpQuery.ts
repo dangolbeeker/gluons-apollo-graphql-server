@@ -9,6 +9,7 @@ import {
   PersistedQueryNotSupportedError,
   PersistedQueryNotFoundError,
   hasPersistedQueryError,
+  SyntaxError
 } from 'apollo-server-errors';
 import {
   processGraphQLRequest,
@@ -119,6 +120,8 @@ export async function runHttpQuery(
   const debugDefault =
     process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
 
+  let requestIsFromPlayground: boolean = handlerArguments[2]["requestIsFromPlayground"];
+
   try {
     options = await resolveGraphqlOptions(request.options, ...handlerArguments);
   } catch (e) {
@@ -188,7 +191,7 @@ export async function runHttpQuery(
     plugins: options.plugins || [],
   };
 
-  return processHTTPRequest(config, request);
+  return processHTTPRequest(config, request, requestIsFromPlayground);
 }
 
 export async function processHTTPRequest<TContext>(
@@ -196,6 +199,7 @@ export async function processHTTPRequest<TContext>(
     context: TContext;
   },
   httpRequest: HttpQueryRequest,
+  requestIsFromPlayground: boolean
 ): Promise<HttpQueryResponse> {
   let requestPayload;
 
@@ -296,9 +300,18 @@ export async function processHTTPRequest<TContext>(
           }
         }),
       );
-
       body = prettyJSONStringify(responses.map(serializeGraphQLResponse));
     } else {
+      if(!requestIsFromPlayground) {
+        if(typeof(requestPayload.gqlId) === 'undefined') {
+          // throw new HttpQueryError(
+          //   500,
+          //   '`gqlId` is missing for Gluons packet',
+          // );
+          throw new SyntaxError('`gqlId` field is missing in Gluons GraphQL packet (body)')
+        }
+      }
+
       // We're processing a normal request
       const request = parseGraphQLRequest(httpRequest.request, requestPayload);
 
@@ -325,7 +338,13 @@ export async function processHTTPRequest<TContext>(
           }
         }
 
-        body = prettyJSONStringify(serializeGraphQLResponse(response));
+        let jsonResponse = serializeGraphQLResponse(response);
+        if(!requestIsFromPlayground) {
+          // @ts-ignore
+          jsonResponse["gqlId"] = requestPayload.gqlId;
+        }
+
+        body = prettyJSONStringify(jsonResponse);
       } catch (error) {
         if (error instanceof InvalidGraphQLRequestError) {
           throw new HttpQueryError(400, error.message);
